@@ -3,6 +3,7 @@
 [![Build Loader](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml)
 [![Build Payload](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml)
 [![Release](https://github.com/GizzZmo/ps4/actions/workflows/release.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/release.yml)
+[![Deploy](https://github.com/GizzZmo/ps4/actions/workflows/deploy.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/deploy.yml)
 
 > **Use at your own risk.** This project is for educational and research purposes only. Running unsigned code on a retail PS4 may void your warranty and violate Sony's terms of service.
 
