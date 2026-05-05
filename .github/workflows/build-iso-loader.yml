@@ -1,5 +1,6 @@
-# Build ISO Loader Test — compile iso_loader_test (the self-contained ISO 9660 test binary) on Linux (Ubuntu).
-# Uploads iso_loader_test as a workflow artifact.
+# Build ISO Loader Test — dedicated artifact upload for iso_loader_test (self-contained ISO 9660 test binary).
+# NOTE: iso_loader_test is already exercised by `make test` in build-loader.yml and deploy.yml on every
+# push/PR. This workflow's primary purpose is to publish iso_loader_test as a named artifact.
 # Badge: https://github.com/GizzZmo/ps4/actions/workflows/build-iso-loader.yml/badge.svg
 
 name: Build ISO Loader
@@ -8,8 +9,6 @@ on:
   push:
     branches: ["**"]
     tags: ["v*"]
-  pull_request:
-    branches: ["**"]
 
 permissions:
   contents: read
