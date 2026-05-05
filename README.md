@@ -20,12 +20,14 @@ A self-contained, portable Mach-O 64-bit segment loader written in C that runs o
 6. [Building the Loader](#building-the-loader)
 7. [Running the Test](#running-the-test)
 8. [PS4 Integration](#ps4-integration)
-9. [API Reference](#api-reference)
-10. [Security Notes](#security-notes)
-11. [Troubleshooting](#troubleshooting)
-12. [Further Reading](#further-reading)
-13. [Science and Art](#science-and-art)
-14. [About](#about)
+9. [ISO Loader — Installing an OS from Disc Image](#iso-loader--installing-an-os-from-disc-image)
+10. [Official Darwin x86 / x64 Resources](#official-darwin-x86--x64-resources)
+11. [API Reference](#api-reference)
+12. [Security Notes](#security-notes)
+13. [Troubleshooting](#troubleshooting)
+14. [Further Reading](#further-reading)
+15. [Science and Art](#science-and-art)
+16. [About](#about)
 
 ---
 
@@ -42,6 +44,7 @@ This project provides:
 | Execution harness | `macho_test.c` | Promotes pages to RX, issues a memory fence, and runs the payload |
 | Driver / entry point | `main.c` | Reads the payload file and calls `test_macho_execution` |
 | Bare-metal payload | `payload.c` | Minimal `_start` with no libc – cross-compiled to Mach-O |
+| ISO 9660 / El Torito loader | `iso_loader.h`, `iso_loader.c` | Parses disc images and extracts boot images or individual files |
 
 ---
 
@@ -54,10 +57,14 @@ ps4/
 ├── macho_test.c     # Execution harness (test_macho_execution)
 ├── main.c           # Driver: reads payload file, calls test_macho_execution
 ├── payload.c        # Bare-metal payload source (cross-compiled separately)
-├── Makefile         # Build rules for loader and payload
+├── iso_loader.h     # ISO 9660 / El Torito type definitions and public API
+├── iso_loader.c     # ISO loader (iso_load_boot_image, iso_find_file)
+├── iso_loader_test.c# Self-contained ISO loader test (no disc file needed)
+├── Makefile         # Build rules for loader, payload, and ISO loader
 ├── docs/
 │   ├── ARCHITECTURE.md      # Deep dive into loader internals
 │   ├── BUILD.md             # Step-by-step build instructions
+│   ├── ISO_LOADER.md        # ISO 9660 / El Torito loader guide
 │   ├── API_REFERENCE.md     # Full public API reference
 │   ├── PS4_INTEGRATION.md   # PS4-specific how-to guide
 │   └── TROUBLESHOOTING.md   # Common issues & solutions
@@ -283,6 +290,104 @@ The `ps4_mprotect` macro in `macho_test.c` handles this automatically when compi
 
 ---
 
+## ISO Loader — Installing an OS from Disc Image
+
+The ISO loader (`iso_loader.h` / `iso_loader.c`) provides the foundation for
+installing or booting a third-party operating system on the PS4 directly from a
+standard `.iso` disc image (any Linux distribution, Darwin installer, etc.).
+
+See [`docs/ISO_LOADER.md`](docs/ISO_LOADER.md) for the complete guide. A brief summary:
+
+### What it does
+
+| Function | Purpose |
+|----------|---------|
+| `iso_load_boot_image(iso_data, iso_size, &out)` | Parse the El Torito boot catalog and extract the default boot image into a `malloc`'d buffer |
+| `iso_find_file(iso_data, iso_size, "/path/to/file", &size)` | Traverse the ISO 9660 directory tree and return a direct pointer to any file (kernel, initrd, config) |
+| `iso_free_boot_image(&img)` | Release memory allocated by `iso_load_boot_image` |
+
+### Build and test
+
+```bash
+make iso_loader       # compile iso_loader_test
+./iso_loader_test     # expected: ISO loader test: PASS
+
+make test             # runs both the Mach-O integration test and ISO loader test
+```
+
+### Typical PS4 integration flow
+
+```c
+#include "iso_loader.h"
+#include "macho_loader.h"
+
+/* 1. Read or embed the ISO image */
+extern const uint8_t iso_data[];
+extern const size_t  iso_size;
+
+/* 2. Extract the El Torito boot image */
+iso_boot_image_t boot_img;
+if (iso_load_boot_image(iso_data, iso_size, &boot_img) != 0) {
+    notify("ISO parse failed");
+    return;
+}
+
+/* 3a. Darwin boot image — load via the Mach-O loader */
+int ok = test_macho_execution(boot_img.data, boot_img.size);
+iso_free_boot_image(&boot_img);
+
+/* 3b. Linux ISO — find kernel and initrd directly */
+size_t         kernel_size, initrd_size;
+const uint8_t *kernel = iso_find_file(iso_data, iso_size,
+                                       "/boot/vmlinuz", &kernel_size);
+const uint8_t *initrd = iso_find_file(iso_data, iso_size,
+                                       "/boot/initrd.img", &initrd_size);
+/* Then set up struct boot_params and jump to kernel_base + 0x200 */
+```
+
+---
+
+## Official Darwin x86 / x64 Resources
+
+To cross-compile Mach-O x86 and x86_64 binaries targeting Darwin / macOS:
+
+### macOS (native)
+
+| Resource | URL |
+|----------|-----|
+| Xcode (full IDE + SDK) | <https://developer.apple.com/download/applications/> |
+| Xcode Command Line Tools (SDK only) | <https://developer.apple.com/download/all/?q=command+line+tools> |
+| Apple Open Source (XNU / Darwin kernel) | <https://opensource.apple.com/> |
+| XNU kernel source — GitHub mirror | <https://github.com/apple-oss-distributions/xnu> |
+| macOS release history and downloads | <https://support.apple.com/en-us/100100> |
+
+> **Intel / x86_64 note:** macOS Sonoma (14) is the last release to support
+> Intel Macs.  The `-target x86_64-apple-macos` Clang flag works from both
+> Intel and Apple Silicon hosts and targets the same x86_64 Mach-O ABI.
+
+### Linux (cross-compilation)
+
+| Resource | URL |
+|----------|-----|
+| osxcross — macOS cross-toolchain for Linux | <https://github.com/tpoechtrager/osxcross> |
+| LLVM / Clang releases | <https://releases.llvm.org/> |
+| Apple Open Source tarballs (SDK headers) | <https://opensource.apple.com/tarballs/> |
+
+```bash
+# Quick osxcross setup
+git clone https://github.com/tpoechtrager/osxcross.git
+cd osxcross
+# Place a macOS SDK tarball in tarballs/ — see the osxcross README
+UNATTENDED=1 ./build.sh
+export PATH="$PATH:$(pwd)/target/bin"
+
+# Cross-compile Mach-O x86_64 on Linux:
+o64-clang -target x86_64-apple-macos -static -nostdlib -e __start \
+          -o bare_metal_test payload.c
+```
+
+---
+
 ## API Reference
 
 See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) for the full reference. Key functions:
@@ -348,10 +453,13 @@ See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for an extended list wi
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Mach-O format primer, loader design, ASLR handling
 - [`docs/BUILD.md`](docs/BUILD.md) — Detailed build matrix (macOS, Linux, PS4 SDK)
+- [`docs/ISO_LOADER.md`](docs/ISO_LOADER.md) — ISO 9660 / El Torito loader guide and PS4 OS installation
 - [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) — Full API documentation with error codes
 - [`docs/PS4_INTEGRATION.md`](docs/PS4_INTEGRATION.md) — End-to-end PS4 integration walkthrough
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — Diagnostics and common pitfalls
 - [Apple's Mach-O Runtime Architecture](https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/MachORuntime/index.html) — Official format specification
+- [Apple Open Source (Darwin / XNU)](https://opensource.apple.com/) — Official Darwin kernel and toolchain source
+- [XNU kernel source — GitHub mirror](https://github.com/apple-oss-distributions/xnu) — Latest Darwin x86/x64 kernel code
 - [PS4 Developer Wiki](https://www.psdevwiki.com/ps4/) — Community PS4 internals reference
 
 ---
