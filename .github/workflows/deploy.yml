@@ -1,0 +1,124 @@
+# Deploy — CI + deployment pipeline.
+# • On every push / pull-request: build both binaries and run the integration
+#   test so regressions are caught before they reach main.
+# • On a version tag (v*): build both binaries, run the test, then publish a
+#   GitHub Release with the compiled assets attached.
+# Badge: https://github.com/GizzZmo/ps4/actions/workflows/deploy.yml/badge.svg
+
+name: Deploy
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: write   # required for creating GitHub Releases and uploading assets
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # CI – loader + integration test (Linux)
+  # ---------------------------------------------------------------------------
+  ci-loader:
+    name: CI – loader (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Clang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang
+
+      - name: Build loader
+        run: make loader
+
+      - name: Run integration test
+        run: make test
+
+      - name: Upload loader artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macho_loader_test-linux-x86_64
+          path: macho_loader_test
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # CI – bare-metal Mach-O payload (macOS)
+  # ---------------------------------------------------------------------------
+  ci-payload:
+    name: CI – payload (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build payload
+        run: make payload
+
+      - name: Verify Mach-O headers
+        run: |
+          set -euo pipefail
+          file bare_metal_test
+          otool -l bare_metal_test | awk '
+            /LC_MAIN/       { found=1 }
+            /LC_UNIXTHREAD/ { found=1 }
+            END { exit(found ? 0 : 1) }
+          '
+
+      - name: Upload payload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bare_metal_test-macho-x86_64
+          path: bare_metal_test
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Deploy – publish a GitHub Release (version tags only)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy – GitHub Release
+    runs-on: ubuntu-latest
+    needs: [ci-loader, ci-payload]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download loader artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macho_loader_test-linux-x86_64
+          path: dist/
+
+      - name: Download payload artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bare_metal_test-macho-x86_64
+          path: dist/
+
+      - name: List release assets
+        run: ls -lh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "PS4 Mach-O Loader ${{ github.ref_name }}"
+          body: |
+            ## Assets
+
+            | File | Description |
+            |------|-------------|
+            | `macho_loader_test` | Loader + execution harness (Linux x86-64) |
+            | `bare_metal_test`   | Bare-metal Mach-O payload (macOS x86-64) |
+          files: |
+            dist/macho_loader_test
+            dist/bare_metal_test
+          fail_on_unmatched_files: true
