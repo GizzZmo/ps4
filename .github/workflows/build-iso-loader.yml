@@ -3,7 +3,7 @@
 # push/PR. This workflow's primary purpose is to publish iso_loader_test as a named artifact.
 # Badge: https://github.com/GizzZmo/ps4/actions/workflows/build-iso-loader.yml/badge.svg
 
-name: Build ISO Loader
+name: Build ISO Loader Test
 
 on:
   push:
