@@ -38,7 +38,8 @@ toolchain components needed to cross-compile Mach-O x86 and x86_64 binaries.
 | **macOS release history and direct downloads** | <https://support.apple.com/en-us/100100> |
 
 > **Intel / x86_64 note:** macOS Sonoma (14) is the last release to support
-> Intel (x86_64) Macs.  The `-target x86_64-apple-macos` Clang flag produces
+> Intel (x86_64) Macs.  macOS Tahoe 26.4.1 is the latest release and requires
+> Apple Silicon.  The `-target x86_64-apple-macos` Clang flag produces
 > x86_64 Mach-O binaries from any macOS host (Intel or Apple Silicon) and from
 > Linux with the osxcross toolchain.
 
