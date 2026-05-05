@@ -234,9 +234,12 @@ file's extent within `iso_data`.
 
 - Path components are matched **case-insensitively** (ISO 9660 stores names in
   upper case; the caller can pass lower-case paths).
-- Version suffixes (`;N`) appended by disc mastering tools are stripped before
-  comparison.  `"/VMLINUZ"` and `"/VMLINUZ;1"` both match a disc entry named
-  `VMLINUZ;1`.
+- Version suffixes (`;N`) are stripped from **both** the on-disc entry names
+  and the caller-supplied path components before comparison.  `"/VMLINUZ"` and
+  `"/VMLINUZ;1"` both match a disc entry named `VMLINUZ;1`.
+- Multi-extent files (directory flag `ISO_DIR_FLAG_MULTI` set) are not
+  supported; `iso_find_file()` returns `NULL` for such entries rather than
+  silently returning only the first extent.
 - Returns a **direct pointer into `iso_data`** — no allocation is performed.
   The pointer is valid for as long as `iso_data` remains valid.
 - Returns `NULL` on any error (not found, out-of-range extent, invalid input).
@@ -358,15 +361,24 @@ if (rc != 0) {
 }
 ```
 
-### Step 3 — Load and execute via the Mach-O loader (Darwin boot images)
+### Step 3 — Inspect the boot image type before passing it to a loader
 
-For a Darwin / macOS installer ISO the boot image is itself a Mach-O binary.
-Pass it directly to `test_macho_execution`:
+El Torito boot payloads vary by ISO type:
+
+- **BIOS boot sectors** (`media_type == ISO_ELTORITO_MEDIA_NO_EMUL`, `platform_id == ISO_ELTORITO_PLATFORM_X86`): raw x86 code loaded at 0x7C00.
+- **UEFI boot images** (`platform_id == ISO_ELTORITO_PLATFORM_EFI`): a FAT filesystem image or PE binary — **not** a Mach-O file.
+- **Mach-O binaries** are generally not used as El Torito payloads on standard installer media.
+
+Check `boot_img.platform_id` and `boot_img.media_type` before deciding how to handle the image:
 
 ```c
-#include "macho_loader.h"
-
-int ok = test_macho_execution(boot_img.data, boot_img.size);
+if (boot_img.platform_id == ISO_ELTORITO_PLATFORM_EFI) {
+    /* UEFI FAT image — handle as a PE/FAT payload */
+} else if (boot_img.platform_id == ISO_ELTORITO_PLATFORM_X86) {
+    /* x86 BIOS boot sector */
+} else {
+    notify("Unsupported El Torito platform");
+}
 iso_free_boot_image(&boot_img);
 ```
 

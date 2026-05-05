@@ -333,8 +333,16 @@ if (iso_load_boot_image(iso_data, iso_size, &boot_img) != 0) {
     return;
 }
 
-/* 3a. Darwin boot image — load via the Mach-O loader */
-int ok = test_macho_execution(boot_img.data, boot_img.size);
+/* 3. Inspect the boot image type before use.
+ *    El Torito payloads are typically x86 BIOS boot sectors (platform_id =
+ *    ISO_ELTORITO_PLATFORM_X86) or UEFI FAT/PE images (PLATFORM_EFI), NOT
+ *    Mach-O binaries.  Do not pass arbitrary El Torito payloads to the
+ *    Mach-O loader. */
+if (boot_img.platform_id == ISO_ELTORITO_PLATFORM_X86) {
+    /* BIOS boot sector */
+} else if (boot_img.platform_id == ISO_ELTORITO_PLATFORM_EFI) {
+    /* UEFI FAT/PE image */
+}
 iso_free_boot_image(&boot_img);
 
 /* 3b. Linux ISO — find kernel and initrd directly */

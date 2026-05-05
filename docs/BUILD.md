@@ -49,7 +49,8 @@ toolchain components needed to cross-compile Mach-O x86 and x86_64 binaries.
 |----------|-------------|
 | **osxcross** — macOS cross-compilation toolchain for Linux | <https://github.com/tpoechtrager/osxcross> |
 | **LLVM / Clang releases** (required by osxcross) | <https://releases.llvm.org/> |
-| **Apple Open Source tarballs** (SDK header tarballs used by osxcross) | <https://opensource.apple.com/tarballs/> |
+| **macOS SDK from Xcode or Command Line Tools** (required by osxcross; extract from Xcode `.xip` or CLT `.dmg`) | <https://developer.apple.com/download/all/?q=command+line+tools> |
+| **Apple Open Source** (Darwin kernel / XNU source; *not* a usable SDK/sysroot for osxcross) | <https://opensource.apple.com/tarballs/> |
 
 ---
 
