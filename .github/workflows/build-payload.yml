@@ -30,7 +30,11 @@ jobs:
         run: |
           set -euo pipefail
           file bare_metal_test
-          otool -l bare_metal_test | grep -A4 LC_MAIN
+          otool -l bare_metal_test | awk '
+            /LC_MAIN/ { found=1 }
+            /LC_UNIXTHREAD/ { found=1 }
+            END { exit(found ? 0 : 1) }
+          '
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
