@@ -201,9 +201,15 @@ void *load_mach_o_segments(const uint8_t *macho_data, size_t size,
             /*
              * entryoff is relative to the start of the mapped __TEXT
              * segment (vm_min after applying the slide).
-             * Validate that it falls within the reservation before use.
+             * Validate that it falls within the executable code region:
+             *   - Must be past the Mach-O header and load-command table
+             *     (entryoff < header+cmds would point into header data).
+             *   - Must be within the reservation.
              */
-            if (ep->entryoff >= (uint64_t)total_size) {
+            uint64_t min_off = (uint64_t)(sizeof(mach_header_64_t) +
+                                           hdr->sizeofcmds);
+            if (ep->entryoff < min_off ||
+                ep->entryoff >= (uint64_t)total_size) {
                 munmap(base, total_size);
                 return NULL;
             }
