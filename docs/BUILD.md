@@ -6,17 +6,49 @@ This guide walks through every supported build configuration: development host (
 
 ## Table of Contents
 
-1. [Prerequisites](#prerequisites)
-2. [Building the Bare-Metal Payload](#building-the-bare-metal-payload)
+1. [Official Darwin x86 / x64 Download Links](#official-darwin-x86--x64-download-links)
+2. [Prerequisites](#prerequisites)
+3. [Building the Bare-Metal Payload](#building-the-bare-metal-payload)
    - [macOS (native)](#macos-native)
    - [Linux with osxcross](#linux-with-osxcross)
    - [Verifying the Output](#verifying-the-output)
-3. [Building the Loader on a Development Host](#building-the-loader-on-a-development-host)
+4. [Building the Loader on a Development Host](#building-the-loader-on-a-development-host)
    - [macOS](#macos)
    - [Linux](#linux)
-4. [Building for PS4](#building-for-ps4)
-5. [Optional: Makefile](#optional-makefile)
-6. [Build Flags Reference](#build-flags-reference)
+5. [Building for PS4](#building-for-ps4)
+6. [Building the ISO Loader](#building-the-iso-loader)
+7. [Optional: Makefile](#optional-makefile)
+8. [Build Flags Reference](#build-flags-reference)
+
+---
+
+## Official Darwin x86 / x64 Download Links
+
+The following are the **official** Apple sources for the Darwin / macOS SDK and
+toolchain components needed to cross-compile Mach-O x86 and x86_64 binaries.
+
+### macOS SDK and Toolchain
+
+| Resource | Official URL |
+|----------|-------------|
+| **Xcode** (full IDE + macOS SDK, recommended) | <https://developer.apple.com/download/applications/> |
+| **Xcode Command Line Tools** (SDK only, no IDE) | <https://developer.apple.com/download/all/?q=command+line+tools> |
+| **Apple Open Source** (Darwin kernel, XNU, libdispatch, …) | <https://opensource.apple.com/> |
+| **XNU kernel source** — Apple OSS Distributions on GitHub | <https://github.com/apple-oss-distributions/xnu> |
+| **macOS release history and direct downloads** | <https://support.apple.com/en-us/100100> |
+
+> **Intel / x86_64 note:** macOS Sonoma (14) is the last release to support
+> Intel (x86_64) Macs.  The `-target x86_64-apple-macos` Clang flag produces
+> x86_64 Mach-O binaries from any macOS host (Intel or Apple Silicon) and from
+> Linux with the osxcross toolchain.
+
+### Linux Cross-Compilation
+
+| Resource | Official URL |
+|----------|-------------|
+| **osxcross** — macOS cross-compilation toolchain for Linux | <https://github.com/tpoechtrager/osxcross> |
+| **LLVM / Clang releases** (required by osxcross) | <https://releases.llvm.org/> |
+| **Apple Open Source tarballs** (SDK header tarballs used by osxcross) | <https://opensource.apple.com/tarballs/> |
 
 ---
 
@@ -26,7 +58,7 @@ This guide walks through every supported build configuration: development host (
 
 | Tool | Install |
 |------|---------|
-| Xcode Command Line Tools | `xcode-select --install` |
+| Xcode Command Line Tools | `xcode-select --install` or download from <https://developer.apple.com/download/all/?q=command+line+tools> |
 | Clang ≥ 10 (bundled with Xcode) | Included with Xcode CLT |
 | `otool` | Included with Xcode CLT |
 
@@ -199,6 +231,42 @@ ${PS4CC} -std=c11 -O2 \
 ```
 
 Link the resulting object files into your existing PS4 payload project as usual. See [`PS4_INTEGRATION.md`](PS4_INTEGRATION.md) for the full integration walkthrough.
+
+---
+
+## Building the ISO Loader
+
+The ISO loader (`iso_loader.c`) is standard C11 POSIX code.  It compiles on any
+POSIX host or the PS4 SDK with no extra flags.
+
+### Development host (macOS / Linux)
+
+```bash
+# Build the ISO loader and run its self-contained test:
+make iso_loader
+./iso_loader_test
+# Expected: ISO loader test: PASS
+```
+
+Or manually:
+
+```bash
+clang -std=c11 -Wall -Wextra -O2 -I. \
+      -o iso_loader_test iso_loader.c iso_loader_test.c
+```
+
+### PS4 SDK
+
+```bash
+PS4CC=x86_64-ps4-clang
+
+${PS4CC} -std=c11 -O2 -I. \
+    -DSCE_KERNEL_MPROTECT_AVAILABLE \
+    -c iso_loader.c -o iso_loader.o
+```
+
+Link `iso_loader.o` into your existing PS4 payload.  See
+[`ISO_LOADER.md`](ISO_LOADER.md) for the complete PS4 integration guide.
 
 ---
 
