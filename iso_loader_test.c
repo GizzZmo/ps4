@@ -332,7 +332,7 @@ static uint8_t *build_dir_size_iso(void)
      * with the full ISO_SECTOR_SIZE as data_length.
      * This record will be appended after "BOOT" in the root directory.
      */
-    uint8_t extra_rec[48]; /* 33 + 11 = 44, rounded up to 44 (even) */
+    uint8_t extra_rec[44]; /* 33 (fixed header) + 11 (name) = 44, already even */
     memset(extra_rec, 0, sizeof(extra_rec));
     size_t extra_rec_len = make_dir_record(extra_rec,
                                            LBA_BOOT_IMAGE, ISO_SECTOR_SIZE,

@@ -103,7 +103,8 @@ static uint32_t find_extent_size_by_lba(const uint8_t *iso_data,
                                          int            depth)
 {
     uint64_t dir_off = (uint64_t)dir_lba * ISO_SECTOR_SIZE;
-    if (dir_off + dir_size > (uint64_t)iso_size) {
+    if (dir_size > (uint64_t)iso_size ||
+        dir_off > (uint64_t)iso_size - dir_size) {
         return 0;
     }
 
@@ -120,7 +121,7 @@ static uint32_t find_extent_size_by_lba(const uint8_t *iso_data,
         if (rec->length == 0) {
             size_t pos  = (size_t)(ptr - iso_data);
             size_t next = (pos / ISO_SECTOR_SIZE + 1) * ISO_SECTOR_SIZE;
-            if (next >= iso_size) {
+            if (next <= pos || next >= iso_size) {
                 break;
             }
             ptr = iso_data + next;
