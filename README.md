@@ -1,4 +1,4 @@
-After one hour work, 05/05/2026 - # PS4 Mach-O Loader — Proof of Concept
+# PS4 Mach-O Loader — Proof of Concept
 
 [![Build Loader](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml)
 [![Build Payload](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml)
@@ -290,19 +290,22 @@ See [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) for the full reference. Key
 ### `load_mach_o_segments`
 
 ```c
-void *load_mach_o_segments(const uint8_t *macho_data, size_t size);
+void *load_mach_o_segments(const uint8_t *macho_data, size_t size,
+                            void **out_map_base, size_t *out_map_size);
 ```
 
 | Parameter | Description |
 |-----------|-------------|
 | `macho_data` | Pointer to the raw Mach-O image in memory |
 | `size` | Byte length of the buffer |
+| `out_map_base` | Optional — receives the `mmap` reservation base (for `munmap`/`mprotect`) |
+| `out_map_size` | Optional — receives the `mmap` reservation size (for `munmap`/`mprotect`) |
 
 **Returns** a pointer to the entry point on success, `NULL` on any error (bad magic, missing entry point, allocation failure, malformed load commands).
 
 **Caller responsibilities:**
-- Call `mprotect` (or `sceKernelMprotect`) to set the mapped pages to `RX` before executing the returned pointer.
-- Free the mapping with `munmap` when finished (track `base` and `total_size` separately if needed).
+- Call `mprotect` (or `sceKernelMprotect`) with `out_map_base`/`out_map_size` to set the mapped pages to `RX` before executing the returned pointer.
+- Free the mapping with `munmap(out_map_base, out_map_size)` when finished.
 
 ---
 

@@ -36,7 +36,8 @@ static inline uint64_t align_up(uint64_t v, uint64_t align)
 /* -------------------------------------------------------------------------
  * load_mach_o_segments()
  * ---------------------------------------------------------------------- */
-void *load_mach_o_segments(const uint8_t *macho_data, size_t size)
+void *load_mach_o_segments(const uint8_t *macho_data, size_t size,
+                            void **out_map_base, size_t *out_map_size)
 {
     const mach_header_64_t *hdr;
     const uint8_t          *cmd_ptr;
@@ -200,7 +201,13 @@ void *load_mach_o_segments(const uint8_t *macho_data, size_t size)
             /*
              * entryoff is relative to the start of the mapped __TEXT
              * segment (vm_min after applying the slide).
+             * Validate that it falls within the reservation before use.
              */
+            if (ep->entryoff >= (uint64_t)total_size) {
+                munmap(base, total_size);
+                return NULL;
+            }
+
             entry_addr = (void *)((uintptr_t)base + ep->entryoff);
             break;
         }
@@ -242,7 +249,16 @@ void *load_mach_o_segments(const uint8_t *macho_data, size_t size)
             uint64_t rip;
             memcpy(&rip, cmd_ptr + rip_offset, sizeof(rip));
 
-            entry_addr = (void *)(uintptr_t)(rip + slide);
+            void *ep_addr = (void *)(uintptr_t)(rip + slide);
+
+            /* Validate the computed entry point falls within the mapping. */
+            if ((uintptr_t)ep_addr < (uintptr_t)base ||
+                (uintptr_t)ep_addr >= (uintptr_t)base + total_size) {
+                munmap(base, total_size);
+                return NULL;
+            }
+
+            entry_addr = ep_addr;
             break;
         }
 
@@ -252,6 +268,14 @@ void *load_mach_o_segments(const uint8_t *macho_data, size_t size)
     if (entry_addr == NULL) {
         munmap(base, total_size);
         return NULL;
+    }
+
+    /* Provide the mapping coordinates to the caller for mprotect / munmap. */
+    if (out_map_base != NULL) {
+        *out_map_base = base;
+    }
+    if (out_map_size != NULL) {
+        *out_map_size = total_size;
     }
 
     return entry_addr;

@@ -99,21 +99,30 @@ typedef struct {
  * LC_SEGMENT_64 into anonymous memory, and return the entry-point address.
  *
  * Parameters:
- *   macho_data  - pointer to the raw Mach-O bytes in memory
- *   size        - byte length of the buffer
+ *   macho_data   - pointer to the raw Mach-O bytes in memory
+ *   size         - byte length of the buffer
+ *   out_map_base - optional; if non-NULL, receives the base address of the
+ *                  mmap reservation (needed to call munmap later).
+ *   out_map_size - optional; if non-NULL, receives the total byte size of
+ *                  the mmap reservation.
  *
  * Returns:
  *   A non-NULL pointer to the entry point on success; NULL on any error
  *   (bad magic, missing entry point, allocation failure, …).
+ *   out_map_base and out_map_size are only written on success.
  *
  * Notes:
  *   * Mapped memory is initially RW; the caller must call mprotect (or the
  *     PS4 equivalent sceKernelMprotect) to add VM_PROT_EXEC before jumping
  *     to the returned address.
+ *   * The caller is responsible for releasing the mapping with munmap() when
+ *     it is no longer needed.  Use out_map_base and out_map_size to obtain
+ *     the correct base and size for the munmap call.
  *   * Only LC_SEGMENT_64 and LC_MAIN / LC_UNIXTHREAD are examined; all
  *     other load commands are skipped.
  */
-void *load_mach_o_segments(const uint8_t *macho_data, size_t size);
+void *load_mach_o_segments(const uint8_t *macho_data, size_t size,
+                            void **out_map_base, size_t *out_map_size);
 
 /*
  * test_macho_execution() - Map, execute, and validate a bare-metal Mach-O

@@ -173,7 +173,8 @@ Mirror the `<sys/mman.h>` constants on FreeBSD / PS4. Combine with bitwise OR:
 **Implemented in:** `macho_loader.c`
 
 ```c
-void *load_mach_o_segments(const uint8_t *macho_data, size_t size);
+void *load_mach_o_segments(const uint8_t *macho_data, size_t size,
+                            void **out_map_base, size_t *out_map_size);
 ```
 
 ### Description
@@ -193,6 +194,10 @@ The function performs three sequential passes:
 |-----------|------|-------------|
 | `macho_data` | `const uint8_t *` | Pointer to the start of the Mach-O image in memory. Must not be `NULL`. |
 | `size` | `size_t` | Byte length of the buffer pointed to by `macho_data`. |
+| `out_map_base` | `void **` | Optional (may be `NULL`). On success, receives the base address of the `mmap` reservation. Pass the value to `munmap` when finished. |
+| `out_map_size` | `size_t *` | Optional (may be `NULL`). On success, receives the total byte size of the `mmap` reservation. Pass the value to `munmap` and `mprotect`. |
+
+`out_map_base` and `out_map_size` are **only written on success** (non-`NULL` return value).
 
 ### Return Value
 
@@ -216,11 +221,13 @@ The function performs three sequential passes:
 | Segment destination out of reserved region | Malformed `vmaddr` or `vmsize` |
 | No `LC_MAIN` or `LC_UNIXTHREAD` found | No entry point declared |
 | `LC_MAIN` `cmdsize` too small | Malformed entry-point command |
+| `LC_MAIN` `entryoff` outside the mapped region | Entry point out of bounds |
+| `LC_UNIXTHREAD` computed RIP outside the mapped region | Entry point out of bounds |
 
 ### Caller Responsibilities
 
-1. **Memory protection**: the returned pointer points into a `PROT_READ|PROT_WRITE` mapping. You **must** call `mprotect` (or `sceKernelMprotect` on PS4) to add `PROT_EXEC` before executing the returned pointer.
-2. **Memory lifetime**: the mapping is *not* freed by this function. If you need to reclaim it, track the base address and total size yourself and call `munmap`.
+1. **Memory protection**: the returned pointer points into a `PROT_READ|PROT_WRITE` mapping. You **must** call `mprotect` (or `sceKernelMprotect` on PS4) to add `PROT_EXEC` before executing the returned pointer.  Use `out_map_base` and `out_map_size` as the address and length arguments to `mprotect` so that the entire reservation is covered.
+2. **Memory lifetime**: the mapping is *not* freed by this function. Call `munmap(out_map_base, out_map_size)` when the mapping is no longer needed to avoid a memory leak.
 
 ### Example
 
@@ -229,23 +236,25 @@ The function performs three sequential passes:
 #include <sys/mman.h>
 
 void run_payload(const uint8_t *data, size_t len) {
-    void *entry = load_mach_o_segments(data, len);
+    void  *map_base = NULL;
+    size_t map_size = 0;
+
+    void *entry = load_mach_o_segments(data, len, &map_base, &map_size);
     if (!entry) {
         /* parse/map failed */
         return;
     }
 
-    /* Compute page-aligned base of the entry page */
-    void  *page = (void *)((uintptr_t)entry & ~(size_t)0xfff);
-    size_t prot_size = (len + 0xfff) & ~(size_t)0xfff;
-
-    if (mprotect(page, prot_size, PROT_READ | PROT_EXEC) != 0) {
+    if (mprotect(map_base, map_size, PROT_READ | PROT_EXEC) != 0) {
+        munmap(map_base, map_size);
         return;
     }
 
     typedef int (*fn_t)(void);
     int result = ((fn_t)(uintptr_t)entry)();
     /* use result */
+
+    munmap(map_base, map_size);
 }
 ```
 

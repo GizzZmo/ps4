@@ -35,16 +35,6 @@ extern int sceKernelMprotect(void *addr, size_t len, int prot);
 #endif
 
 /* -------------------------------------------------------------------------
- * Page-size helpers (4 KiB is universal for x86_64)
- * ---------------------------------------------------------------------- */
-#define PAGE_SIZE_4K ((size_t)0x1000)
-
-static inline size_t page_align(size_t v)
-{
-    return (v + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
-}
-
-/* -------------------------------------------------------------------------
  * Function-pointer type for the payload entry point
  * ---------------------------------------------------------------------- */
 typedef int (*payload_entry_t)(void);
@@ -55,7 +45,10 @@ typedef int (*payload_entry_t)(void);
 int test_macho_execution(const uint8_t *macho_data, size_t size)
 {
     /* 1. Map and parse the Mach-O image. */
-    void *entry_addr = load_mach_o_segments(macho_data, size);
+    void  *map_base = NULL;
+    size_t map_size = 0;
+    void  *entry_addr = load_mach_o_segments(macho_data, size,
+                                              &map_base, &map_size);
 
     if (entry_addr == NULL) {
         /* Failed to parse the image or locate the entry point. */
@@ -71,17 +64,14 @@ int test_macho_execution(const uint8_t *macho_data, size_t size)
      * We must therefore call mprotect (or sceKernelMprotect on PS4) to
      * replace PROT_WRITE with PROT_EXEC before the jump.
      *
-     * The segment size is approximated here as the page-aligned region that
-     * starts at the beginning of the page containing entry_addr.  A full
-     * implementation would track the exact mapping bounds returned by
-     * load_mach_o_segments(); this simplification is sufficient for the PoC.
+     * We use the exact mapping coordinates (map_base, map_size) returned by
+     * load_mach_o_segments so that the entire reservation is covered, not
+     * just the page containing the entry point.
      */
-    void   *page_base = (void *)((uintptr_t)entry_addr & ~(PAGE_SIZE_4K - 1));
-    size_t  prot_size = page_align(size);   /* conservative upper bound */
-
-    if (ps4_mprotect(page_base, prot_size,
+    if (ps4_mprotect(map_base, map_size,
                      VM_PROT_READ | VM_PROT_EXEC) != 0) {
-        /* Could not change protection – abort rather than segfault. */
+        /* Could not change protection – release the mapping and abort. */
+        munmap(map_base, map_size);
         return 0;
     }
 
@@ -110,16 +100,14 @@ int test_macho_execution(const uint8_t *macho_data, size_t size)
 
     int result = execute_payload();
 
+    /* 5. Release the mapping now that execution is complete. */
+    munmap(map_base, map_size);
+
     /*
-     * 5. Validate the result.
+     * 6. Validate the result.
      *
      * payload.c computes 0x1337 + 0x42.  Any other value means the Mach-O
      * was not mapped or executed correctly.
      */
-    if (result == 0x1379) {
-        /* SUCCESS: the Mach-O was mapped and executed correctly. */
-        return 1;
-    }
-
-    return 0;
+    return (result == 0x1379) ? 1 : 0;
 }
