@@ -96,7 +96,8 @@ To cross-compile Mach-O x86 and x86_64 binaries targeting Darwin / macOS:
 | macOS release history and downloads | <https://support.apple.com/en-us/100100> |
 
 > **Note:** Intel (x86_64) Macs are supported through macOS Sonoma (14).
-> macOS Sequoia (15) and later require Apple Silicon.  The
+> macOS Sequoia (15) and later require Apple Silicon.  macOS Tahoe 26.4.1 is
+> the latest release and requires Apple Silicon.  The
 > `-target x86_64-apple-macos` cross-compilation flag works from both
 > Intel and Apple Silicon hosts.
 

@@ -363,7 +363,8 @@ To cross-compile Mach-O x86 and x86_64 binaries targeting Darwin / macOS:
 | macOS release history and downloads | <https://support.apple.com/en-us/100100> |
 
 > **Intel / x86_64 note:** macOS Sonoma (14) is the last release to support
-> Intel Macs.  The `-target x86_64-apple-macos` Clang flag works from both
+> Intel Macs.  macOS Tahoe 26.4.1 is the latest release and requires Apple
+> Silicon.  The `-target x86_64-apple-macos` Clang flag works from both
 > Intel and Apple Silicon hosts and targets the same x86_64 Mach-O ABI.
 
 ### Linux (cross-compilation)
