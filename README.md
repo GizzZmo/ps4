@@ -24,6 +24,8 @@ A self-contained, portable Mach-O 64-bit segment loader written in C that runs o
 10. [Security Notes](#security-notes)
 11. [Troubleshooting](#troubleshooting)
 12. [Further Reading](#further-reading)
+13. [Science and Art](#science-and-art)
+14. [About](#about)
 
 ---
 
@@ -354,3 +356,45 @@ See [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) for an extended list wi
 ## License
 
 See [LICENSE](LICENSE) for terms.
+
+---
+
+## Science and Art
+
+This project sits at the intersection of **low-level systems engineering** and the craft of understanding how hardware and software interact at a fundamental level.
+
+### Science
+
+- **Binary format research** — dissecting the Mach-O object format to understand how modern operating systems load and execute code, from ELF on Linux to Mach-O on macOS/Darwin.
+- **Cross-architecture portability** — exploring how the same AMD64 instruction stream can be executed on wildly different OS kernels (FreeBSD/PS4 vs. macOS) given the right loader shim.
+- **Memory management** — studying virtual memory mapping, page permissions (`RW → RX`), ASLR, and the kernel interfaces (`mmap`, `mprotect`, `sceKernelMprotect`) that control them.
+- **Reverse engineering** — using tools such as `otool`, `objdump`, and `nm` to inspect and validate binary artefacts — a core skill in security research and embedded systems.
+
+### Art
+
+- **Minimal C as craft** — writing dependency-free C that compiles cleanly with `-nostdlib` is a discipline: every byte must be intentional, every pointer validated.
+- **Systems as canvas** — hacking a game console to run foreign binaries is, in its own way, a creative act: turning a closed device into an open platform where new ideas can run.
+- **Documentation as storytelling** — the ASCII flowcharts, tables, and structured prose in this project reflect the belief that clear communication is as important as correct code.
+
+---
+
+## About
+
+### Jon-Arve Constantine
+
+**Jon-Arve Constantine** is a developer and researcher with a passion for low-level systems programming, security research, and open-source exploration.
+
+- 🐙 GitHub: [github.com/GizzZmo](https://www.github.com/GizzZmo)
+
+### About This Project
+
+**PS4 Mach-O Loader** is a proof-of-concept that demonstrates how a Mach-O 64-bit binary — normally only executable on macOS/Darwin — can be mapped and run on the PS4's FreeBSD-based kernel. It is intended purely for educational and research purposes, showing how binary loaders work at the OS level and how CPU-architecture compatibility can be leveraged across different operating systems.
+
+Key goals:
+- Understand the Mach-O load-command pipeline end-to-end.
+- Produce a minimal, auditable loader with no external dependencies.
+- Serve as a foundation for further syscall-shim research.
+
+### Other Projects
+
+Explore more work by Jon-Arve Constantine at **[github.com/GizzZmo](https://www.github.com/GizzZmo)**, including projects spanning systems programming, security tooling, and open-source experiments.
