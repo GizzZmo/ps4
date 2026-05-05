@@ -87,6 +87,82 @@ static uint8_t stripped_name_len(const char *name, uint8_t raw_len)
  * iso_load_boot_image()
  * ---------------------------------------------------------------------- */
 
+/*
+ * find_extent_size_by_lba() — Search the directory tree rooted at
+ * (dir_lba, dir_size) for a file record whose extent_lba matches
+ * target_lba and return its data_length.  Returns 0 if not found.
+ *
+ * Recurses into subdirectories up to 'depth' levels deep to cover boot
+ * images stored below the root (e.g. /EFI/BOOT/bootx64.efi).
+ */
+static uint32_t find_extent_size_by_lba(const uint8_t *iso_data,
+                                         size_t         iso_size,
+                                         uint32_t       dir_lba,
+                                         uint32_t       dir_size,
+                                         uint32_t       target_lba,
+                                         int            depth)
+{
+    uint64_t dir_off = (uint64_t)dir_lba * ISO_SECTOR_SIZE;
+    if (dir_size > (uint64_t)iso_size ||
+        dir_off > (uint64_t)iso_size - dir_size) {
+        return 0;
+    }
+
+    const uint8_t *ptr = iso_data + (size_t)dir_off;
+    const uint8_t *end = ptr + dir_size;
+
+    while (ptr < end) {
+        if ((size_t)(end - ptr) < sizeof(iso_dir_record_t)) {
+            break;
+        }
+
+        const iso_dir_record_t *rec = (const iso_dir_record_t *)ptr;
+
+        if (rec->length == 0) {
+            size_t pos  = (size_t)(ptr - iso_data);
+            size_t next = (pos / ISO_SECTOR_SIZE + 1) * ISO_SECTOR_SIZE;
+            if (next <= pos || next >= iso_size) {
+                break;
+            }
+            ptr = iso_data + next;
+            continue;
+        }
+
+        if (ptr + rec->length > end) {
+            break;
+        }
+
+        /* Skip "." and ".." */
+        if (rec->name_length == 1) {
+            uint8_t nb = (uint8_t)iso_dir_name(rec)[0];
+            if (nb == 0x00 || nb == 0x01) {
+                ptr += rec->length;
+                continue;
+            }
+        }
+
+        int is_dir = (rec->flags & ISO_DIR_FLAG_DIRECTORY) != 0;
+
+        if (!is_dir && rec->extent_lba.le == target_lba) {
+            return rec->data_length.le;
+        }
+
+        if (is_dir && depth > 0) {
+            uint32_t sub = find_extent_size_by_lba(
+                iso_data, iso_size,
+                rec->extent_lba.le, rec->data_length.le,
+                target_lba, depth - 1);
+            if (sub > 0) {
+                return sub;
+            }
+        }
+
+        ptr += rec->length;
+    }
+
+    return 0;
+}
+
 int iso_load_boot_image(const uint8_t *iso_data, size_t iso_size,
                         iso_boot_image_t *out)
 {
@@ -97,10 +173,11 @@ int iso_load_boot_image(const uint8_t *iso_data, size_t iso_size,
 
     /* ------------------------------------------------------------------
      * Pass 1 — Walk volume descriptors (starting at sector 16) to find
-     * the El Torito Boot Record Volume Descriptor.
+     * the El Torito Boot Record Volume Descriptor and the PVD.
      * ---------------------------------------------------------------- */
-    uint32_t boot_catalog_lba = 0;
-    int      found = 0;
+    uint32_t       boot_catalog_lba = 0;
+    int            found = 0;
+    const iso_pvd_t *pvd = NULL;
 
     for (uint32_t lba = ISO_SYSTEM_AREA; ; lba++) {
         const uint8_t *sec = sector_ptr(iso_data, iso_size, lba);
@@ -119,6 +196,10 @@ int iso_load_boot_image(const uint8_t *iso_data, size_t iso_size,
 
         if (hdr->type == ISO_VD_TERMINATOR) {
             break;
+        }
+
+        if (hdr->type == ISO_VD_PRIMARY && pvd == NULL) {
+            pvd = (const iso_pvd_t *)sec;
         }
 
         if (hdr->type == ISO_VD_BOOT_RECORD) {
@@ -159,32 +240,117 @@ int iso_load_boot_image(const uint8_t *iso_data, size_t iso_size,
         return -3;
     }
 
-    /* Boot entry immediately follows the validation entry. */
+    /* ------------------------------------------------------------------
+     * Locate the first bootable entry in the catalog.  Check the Initial/
+     * Default Boot Entry first; if it is not bootable, scan any Section
+     * Header / Section Entry records that follow.  This handles hybrid
+     * ISOs where the EFI entry lives in a later catalog section.
+     * ---------------------------------------------------------------- */
     if (sizeof(iso_eltorito_validation_t) +
             sizeof(iso_eltorito_entry_t) > ISO_SECTOR_SIZE) {
         return -3;
     }
 
-    const iso_eltorito_entry_t *entry =
+    const iso_eltorito_entry_t *entry = NULL;
+
+    const iso_eltorito_entry_t *initial =
         (const iso_eltorito_entry_t *)(catalog +
                                        sizeof(iso_eltorito_validation_t));
 
-    if (entry->boot_indicator != ISO_ELTORITO_BOOTABLE) {
+    if (initial->boot_indicator == ISO_ELTORITO_BOOTABLE) {
+        entry = initial;
+    } else {
+        /*
+         * Initial entry is not bootable; walk any Section Header / Section
+         * Entry records looking for the first bootable one.
+         *
+         * Catalog layout after the Initial entry:
+         *   [Section Header (32 bytes)] [Section Entry × header.entry_count]
+         *   [Section Header (32 bytes)] ...
+         *
+         * Each structure is 32 bytes and the whole catalog fits in one
+         * ISO sector (ISO_SECTOR_SIZE bytes).
+         */
+        const uint8_t *pos = catalog
+            + sizeof(iso_eltorito_validation_t)
+            + sizeof(iso_eltorito_entry_t);
+        const uint8_t *cat_end = catalog + ISO_SECTOR_SIZE;
+
+        while (pos + sizeof(iso_eltorito_section_header_t) <= cat_end) {
+            const iso_eltorito_section_header_t *sh =
+                (const iso_eltorito_section_header_t *)pos;
+
+            if (sh->header_indicator != ISO_ELTORITO_SECTION_MORE &&
+                sh->header_indicator != ISO_ELTORITO_SECTION_LAST) {
+                break; /* not a section header — stop */
+            }
+
+            pos += sizeof(iso_eltorito_section_header_t);
+
+            uint16_t count = sh->entry_count;
+            for (uint16_t i = 0; i < count; i++) {
+                if (pos + sizeof(iso_eltorito_entry_t) > cat_end) {
+                    break;
+                }
+
+                const iso_eltorito_entry_t *se =
+                    (const iso_eltorito_entry_t *)pos;
+
+                if (se->boot_indicator == ISO_ELTORITO_BOOTABLE) {
+                    entry = se;
+                    break;
+                }
+
+                pos += sizeof(iso_eltorito_entry_t);
+            }
+
+            if (entry != NULL) {
+                break;
+            }
+
+            /* Advance past all entries in this section even if we read
+             * fewer than count (bounds check already stopped us). */
+            if (sh->header_indicator == ISO_ELTORITO_SECTION_LAST) {
+                break;
+            }
+        }
+    }
+
+    if (entry == NULL) {
         return -4;
     }
 
     /* ------------------------------------------------------------------
      * Pass 3 — Copy the boot image into a heap buffer.
      *
-     * sector_count is in units of 512-byte virtual sectors.  For no-
-     * emulation images this is the number of 512-byte chunks to load.
-     * If sector_count is 0 (some mastering tools leave it zero), fall
-     * back to one full ISO sector (2048 bytes).
+     * sector_count is in units of 512-byte virtual sectors and reflects
+     * the boot-load size, which may be smaller than the actual file on
+     * disc (many mastering tools write sector_count = 4 even for large
+     * UEFI images).  Attempt to resolve the true file size by scanning
+     * the ISO 9660 directory tree for a record whose extent_lba matches
+     * the boot image LBA.  Fall back to sector_count * 512, with a
+     * floor of one full ISO sector, if the directory scan fails.
      * ---------------------------------------------------------------- */
     uint32_t img_lba  = entry->load_rba;
-    size_t   img_size = (entry->sector_count > 0)
-                        ? (size_t)entry->sector_count * 512u
-                        : ISO_SECTOR_SIZE;
+
+    /* Determine the best available size estimate. */
+    size_t load_size = (entry->sector_count > 0)
+                       ? (size_t)entry->sector_count * 512u
+                       : ISO_SECTOR_SIZE;
+
+    size_t img_size = load_size;
+
+    if (pvd != NULL) {
+        const iso_dir_record_t *root =
+            (const iso_dir_record_t *)pvd->root_dir_record;
+        uint32_t dir_size = find_extent_size_by_lba(
+            iso_data, iso_size,
+            root->extent_lba.le, root->data_length.le,
+            img_lba, 4 /* max descent depth */);
+        if (dir_size > load_size) {
+            img_size = dir_size;
+        }
+    }
 
     uint64_t img_off = (uint64_t)img_lba * ISO_SECTOR_SIZE;
     if (img_off + img_size > (uint64_t)iso_size) {
@@ -287,8 +453,20 @@ static const iso_dir_record_t *find_in_dir(const uint8_t *iso_data,
                                            rec->name_length);
         int     is_dir = (rec->flags & ISO_DIR_FLAG_DIRECTORY) != 0;
 
-        if ((size_t)nlen == comp_len &&
-            istrncmp_upper(component, iso_dir_name(rec), comp_len) == 0 &&
+        /*
+         * Also strip any ";N" version suffix from the caller-supplied
+         * component so that "/VMLINUZ;1" matches a disc entry "VMLINUZ;1".
+         */
+        size_t stripped_comp_len = comp_len;
+        for (size_t i = 0; i < comp_len; i++) {
+            if (component[i] == ';') {
+                stripped_comp_len = i;
+                break;
+            }
+        }
+
+        if ((size_t)nlen == stripped_comp_len &&
+            istrncmp_upper(component, iso_dir_name(rec), stripped_comp_len) == 0 &&
             is_dir == (want_directory ? 1 : 0)) {
             return rec;
         }
@@ -392,6 +570,15 @@ const uint8_t *iso_find_file(const uint8_t *iso_data, size_t iso_size,
             cur_size = rec->data_length.le;
         } else {
             /* Found the target file. */
+            if (rec->flags & ISO_DIR_FLAG_MULTI) {
+                /*
+                 * Multi-extent files (ISO_DIR_FLAG_MULTI set) span more than
+                 * one extent; only the first extent is accessible here.
+                 * Return NULL rather than silently returning incomplete data.
+                 */
+                return NULL;
+            }
+
             uint64_t file_off = (uint64_t)rec->extent_lba.le * ISO_SECTOR_SIZE;
             uint32_t file_len = rec->data_length.le;
 

@@ -208,7 +208,8 @@ typedef struct {
 
 /*
  * Initial / Default Boot Entry — the 32 bytes immediately following the
- * validation entry in the boot catalog.
+ * validation entry in the boot catalog.  Also used for Section Entries
+ * within an El Torito Section Header.
  */
 typedef struct {
     uint8_t  boot_indicator;   /* ISO_ELTORITO_BOOTABLE or NOT_BOOTABLE     */
@@ -220,6 +221,22 @@ typedef struct {
     uint32_t load_rba;         /* LBA of the boot image on the disc         */
     uint8_t  _reserved[20];
 } __attribute__((packed)) iso_eltorito_entry_t;
+
+/*
+ * Section Header Entry — follows the Initial/Default Boot Entry and each
+ * subsequent set of Section Entries in an El Torito boot catalog.
+ * header_indicator == 0x90 means more sections follow; 0x91 means this is
+ * the final section header.
+ */
+#define ISO_ELTORITO_SECTION_MORE  0x90u  /* more sections follow           */
+#define ISO_ELTORITO_SECTION_LAST  0x91u  /* last (or only) section header  */
+
+typedef struct {
+    uint8_t  header_indicator; /* ISO_ELTORITO_SECTION_MORE or _LAST        */
+    uint8_t  platform_id;      /* ISO_ELTORITO_PLATFORM_*                   */
+    uint16_t entry_count;      /* number of Section Entries that follow     */
+    char     id_string[28];    /* informational section identifier           */
+} __attribute__((packed)) iso_eltorito_section_header_t;
 
 /* -------------------------------------------------------------------------
  * Public result structure
@@ -251,7 +268,9 @@ typedef struct {
  *      Record Volume Descriptor.
  *   2. Reads and validates the El Torito boot catalog (validation entry key
  *      must be { 0x55, 0xAA }).
- *   3. Reads the Initial/Default Boot Entry and verifies it is bootable.
+ *   3. Reads the Initial/Default Boot Entry; if it is not bootable, scans
+ *      any Section Header / Section Entry records in the catalog for the
+ *      first bootable entry.
  *   4. Copies the boot image bytes into a malloc'd buffer.
  *
  * Parameters:
@@ -281,8 +300,10 @@ int iso_load_boot_image(const uint8_t *iso_data, size_t iso_size,
  *   iso_size — byte length of the buffer
  *   path     — absolute, slash-separated path, e.g. "/boot/vmlinuz".
  *              Each component is compared case-insensitively (ISO 9660 stores
- *              names in upper case).  Version suffixes appended by the disc
- *              mastering tool (e.g. ";1") are stripped before comparison.
+ *              names in upper case).  Version suffixes (";N") are stripped
+ *              from both the on-disc entry names and the caller-supplied
+ *              path components before comparison, so "/VMLINUZ" and
+ *              "/VMLINUZ;1" both match a disc entry named "VMLINUZ;1".
  *   out_size — if non-NULL, receives the file's byte length on success.
  *
  * Returns:

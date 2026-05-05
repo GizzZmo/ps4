@@ -135,53 +135,51 @@ static size_t make_dir_record(uint8_t  *buf,
  * build_test_iso() — construct the in-memory disc image
  * ---------------------------------------------------------------------- */
 
-static uint8_t *build_test_iso(void)
+/*
+ * Shared helper: write the standard BRVD, PVD, VD Terminator, root directory
+ * and boot image sectors into a pre-allocated (calloc'd) buffer.
+ *
+ * Parameters allow callers to control the boot catalog contents and
+ * optional extra root-directory entries.
+ *
+ * 'extra_dir_off' / 'extra_dir_len': if non-zero, write an additional
+ *   'extra_dir_len' bytes of pre-built directory record data at offset
+ *   'extra_dir_off' within the root-directory sector.
+ */
+static void fill_common_sectors(uint8_t       *iso,
+                                 uint32_t       boot_catalog_lba,
+                                 uint32_t       root_dir_lba,
+                                 uint32_t       boot_image_lba,
+                                 uint16_t       catalog_sector_count,
+                                 const uint8_t *extra_dir_data,
+                                 size_t         extra_dir_off,
+                                 size_t         extra_dir_len)
 {
-    uint8_t *iso = calloc(1, TEST_ISO_SIZE);
-    if (iso == NULL) {
-        return NULL;
-    }
-
-    /* Convenience pointer to the start of a given sector. */
 #define SEC(n) (iso + (size_t)(n) * ISO_SECTOR_SIZE)
 
-    /* ------------------------------------------------------------------
-     * Sector 16 — El Torito Boot Record Volume Descriptor
-     * ---------------------------------------------------------------- */
+    /* Sector 16 — El Torito Boot Record Volume Descriptor */
     {
         uint8_t *s = SEC(LBA_ELTORITO_BRVD);
-        s[0] = ISO_VD_BOOT_RECORD;                 /* type             */
-        memcpy(s + 1, "CD001", 5);                 /* identifier       */
-        s[6] = 1u;                                 /* version          */
-        memcpy(s + 7, "EL TORITO SPECIFICATION", 23); /* boot sys id   */
-        /* boot_catalog_lba at offset 71 (32-bit LE) */
-        put_u32le(s + 71, LBA_BOOT_CATALOG);
+        s[0] = ISO_VD_BOOT_RECORD;
+        memcpy(s + 1, "CD001", 5);
+        s[6] = 1u;
+        memcpy(s + 7, "EL TORITO SPECIFICATION", 23);
+        put_u32le(s + 71, boot_catalog_lba);
     }
 
-    /* ------------------------------------------------------------------
-     * Sector 17 — Primary Volume Descriptor
-     * ---------------------------------------------------------------- */
+    /* Sector 17 — Primary Volume Descriptor */
     {
         uint8_t *s = SEC(LBA_PVD);
-        s[0] = ISO_VD_PRIMARY;                     /* type             */
-        memcpy(s + 1, "CD001", 5);                 /* identifier       */
-        s[6] = 1u;                                 /* version          */
-        /* system_id @ 8, volume_id @ 40 — left blank                   */
-        /* volume_space_size (BBO uint32) @ 80 */
+        s[0] = ISO_VD_PRIMARY;
+        memcpy(s + 1, "CD001", 5);
+        s[6] = 1u;
         put_bbo32(s + 80, TEST_NUM_SECTORS);
-        /* logical_block_size (BBO uint16) @ 128 */
         put_bbo16(s + 128, ISO_SECTOR_SIZE);
-        /* path table size (BBO uint32) @ 132 — irrelevant for this loader */
-        /* root directory record @ offset 156 (34 bytes) */
-        make_dir_record(s + 156,
-                        LBA_ROOT_DIR, ISO_SECTOR_SIZE,
-                        ISO_DIR_FLAG_DIRECTORY,
-                        "\x00", 1u); /* root name is a single 0x00 byte */
+        make_dir_record(s + 156, root_dir_lba, ISO_SECTOR_SIZE,
+                        ISO_DIR_FLAG_DIRECTORY, "\x00", 1u);
     }
 
-    /* ------------------------------------------------------------------
-     * Sector 18 — Volume Descriptor Set Terminator
-     * ---------------------------------------------------------------- */
+    /* Sector 18 — Volume Descriptor Set Terminator */
     {
         uint8_t *s = SEC(LBA_VD_TERMINATOR);
         s[0] = ISO_VD_TERMINATOR;
@@ -189,119 +187,167 @@ static uint8_t *build_test_iso(void)
         s[6] = 1u;
     }
 
-    /* ------------------------------------------------------------------
-     * Sector 19 — El Torito boot catalog
-     *
-     * Validation entry (32 bytes):
-     *   Checksum is chosen so the 16-bit word sum of the 32-byte entry = 0.
-     *   With header_id=0x01, platform=0x00, id_string=zeros, key={0x55,0xAA}:
-     *     sum = 0x0001 (bytes 0-1) + 0xAA55 (bytes 30-31) = 0xAA56
-     *     checksum = (0x10000 - 0xAA56) & 0xFFFF = 0x55AA
-     *     stored LE: byte 28 = 0xAA, byte 29 = 0x55
-     * ---------------------------------------------------------------- */
+    /* Boot catalog (validation + initial entry) */
     {
-        uint8_t *s = SEC(LBA_BOOT_CATALOG);
+        uint8_t *s = SEC(boot_catalog_lba);
+        s[0] = 0x01u;
+        s[1] = ISO_ELTORITO_PLATFORM_X86;
+        s[28] = 0xAAu;
+        s[29] = 0x55u;
+        s[30] = 0x55u;
+        s[31] = 0xAAu;
 
-        /* Validation entry */
-        s[0] = 0x01u;                    /* header_id                    */
-        s[1] = ISO_ELTORITO_PLATFORM_X86;/* platform_id                  */
-        /* bytes 2-3: reserved (zero) */
-        /* bytes 4-27: id_string (zero) */
-        s[28] = 0xAAu;                   /* checksum low byte            */
-        s[29] = 0x55u;                   /* checksum high byte → 0x55AA  */
-        s[30] = 0x55u;                   /* key[0]                       */
-        s[31] = 0xAAu;                   /* key[1]                       */
-
-        /* Initial/Default Boot Entry (immediately follows at offset 32) */
         uint8_t *e = s + 32;
-        e[0] = ISO_ELTORITO_BOOTABLE;   /* boot_indicator               */
-        e[1] = ISO_ELTORITO_MEDIA_NO_EMUL; /* media_type               */
-        /* load_segment @ bytes 2-3: zero → 0x07C0 for x86              */
-        /* system_type @ byte 4: zero                                    */
-        put_u16le(e + 6, (uint16_t)BOOT_IMAGE_SECTOR_COUNT); /* sector_count */
-        put_u32le(e + 8, LBA_BOOT_IMAGE);/* load_rba                    */
+        e[0] = ISO_ELTORITO_BOOTABLE;
+        e[1] = ISO_ELTORITO_MEDIA_NO_EMUL;
+        put_u16le(e + 6, catalog_sector_count);
+        put_u32le(e + 8, boot_image_lba);
     }
 
-    /* ------------------------------------------------------------------
-     * Sector 21 — Boot image
-     * ---------------------------------------------------------------- */
-    {
-        uint8_t *s = SEC(LBA_BOOT_IMAGE);
-        memcpy(s, BOOT_IMAGE_MAGIC, sizeof(BOOT_IMAGE_MAGIC));
-    }
+    /* Boot image sector */
+    memcpy(SEC(boot_image_lba), BOOT_IMAGE_MAGIC, sizeof(BOOT_IMAGE_MAGIC));
 
-    /* ------------------------------------------------------------------
-     * Sector 20 — Root directory entries
-     * ---------------------------------------------------------------- */
+    /* Root directory */
     {
-        uint8_t *s   = SEC(LBA_ROOT_DIR);
+        uint8_t *s   = SEC(root_dir_lba);
         size_t   off = 0;
-
-        /* "." */
-        off += make_dir_record(s + off,
-                               LBA_ROOT_DIR, ISO_SECTOR_SIZE,
+        off += make_dir_record(s + off, root_dir_lba, ISO_SECTOR_SIZE,
                                ISO_DIR_FLAG_DIRECTORY, "\x00", 1u);
-
-        /* ".." */
-        off += make_dir_record(s + off,
-                               LBA_ROOT_DIR, ISO_SECTOR_SIZE,
+        off += make_dir_record(s + off, root_dir_lba, ISO_SECTOR_SIZE,
                                ISO_DIR_FLAG_DIRECTORY, "\x01", 1u);
-
-        /* "TEST.TXT" — note: mastering tools append ";1", our loader strips it */
-        off += make_dir_record(s + off,
-                               LBA_TEST_TXT, sizeof(FILE_TEST_TXT) - 1u,
-                               0u /* file */, "TEST.TXT", 8u);
-
-        /* "BOOT" subdirectory */
-        off += make_dir_record(s + off,
-                               LBA_BOOT_SUBDIR, ISO_SECTOR_SIZE,
+        off += make_dir_record(s + off, LBA_TEST_TXT,
+                               (uint32_t)(sizeof(FILE_TEST_TXT) - 1u),
+                               0u, "TEST.TXT", 8u);
+        off += make_dir_record(s + off, LBA_BOOT_SUBDIR, ISO_SECTOR_SIZE,
                                ISO_DIR_FLAG_DIRECTORY, "BOOT", 4u);
 
-        (void)off; /* suppress unused-variable warning */
-    }
-
-    /* ------------------------------------------------------------------
-     * Sector 22 — TEST.TXT file data
-     * ---------------------------------------------------------------- */
-    {
-        uint8_t *s = SEC(LBA_TEST_TXT);
-        memcpy(s, FILE_TEST_TXT, sizeof(FILE_TEST_TXT) - 1u);
-    }
-
-    /* ------------------------------------------------------------------
-     * Sector 23 — BOOT/ subdirectory entries
-     * ---------------------------------------------------------------- */
-    {
-        uint8_t *s   = SEC(LBA_BOOT_SUBDIR);
-        size_t   off = 0;
-
-        /* "." → this directory */
-        off += make_dir_record(s + off,
-                               LBA_BOOT_SUBDIR, ISO_SECTOR_SIZE,
-                               ISO_DIR_FLAG_DIRECTORY, "\x00", 1u);
-
-        /* ".." → root directory */
-        off += make_dir_record(s + off,
-                               LBA_ROOT_DIR, ISO_SECTOR_SIZE,
-                               ISO_DIR_FLAG_DIRECTORY, "\x01", 1u);
-
-        /* "VMLINUZ" */
-        off += make_dir_record(s + off,
-                               LBA_VMLINUZ, sizeof(FILE_VMLINUZ) - 1u,
-                               0u /* file */, "VMLINUZ", 7u);
+        if (extra_dir_data != NULL && extra_dir_len > 0 &&
+                extra_dir_off + extra_dir_len <= ISO_SECTOR_SIZE) {
+            memcpy(s + extra_dir_off, extra_dir_data, extra_dir_len);
+        }
 
         (void)off;
     }
 
-    /* ------------------------------------------------------------------
-     * Sector 24 — VMLINUZ file data
-     * ---------------------------------------------------------------- */
+    /* TEST.TXT data */
+    memcpy(SEC(LBA_TEST_TXT), FILE_TEST_TXT, sizeof(FILE_TEST_TXT) - 1u);
+
+    /* BOOT/ subdirectory */
     {
-        uint8_t *s = SEC(LBA_VMLINUZ);
-        memcpy(s, FILE_VMLINUZ, sizeof(FILE_VMLINUZ) - 1u);
+        uint8_t *s   = SEC(LBA_BOOT_SUBDIR);
+        size_t   off = 0;
+        off += make_dir_record(s + off, LBA_BOOT_SUBDIR, ISO_SECTOR_SIZE,
+                               ISO_DIR_FLAG_DIRECTORY, "\x00", 1u);
+        off += make_dir_record(s + off, root_dir_lba, ISO_SECTOR_SIZE,
+                               ISO_DIR_FLAG_DIRECTORY, "\x01", 1u);
+        off += make_dir_record(s + off, LBA_VMLINUZ,
+                               (uint32_t)(sizeof(FILE_VMLINUZ) - 1u),
+                               0u, "VMLINUZ", 7u);
+        (void)off;
     }
 
+    /* VMLINUZ data */
+    memcpy(SEC(LBA_VMLINUZ), FILE_VMLINUZ, sizeof(FILE_VMLINUZ) - 1u);
+
 #undef SEC
+}
+
+/* -------------------------------------------------------------------------
+ * build_test_iso() — construct the in-memory disc image
+ * ---------------------------------------------------------------------- */
+
+static uint8_t *build_test_iso(void)
+{
+    uint8_t *iso = calloc(1, TEST_ISO_SIZE);
+    if (iso == NULL) {
+        return NULL;
+    }
+
+    fill_common_sectors(iso,
+                        LBA_BOOT_CATALOG, LBA_ROOT_DIR, LBA_BOOT_IMAGE,
+                        (uint16_t)BOOT_IMAGE_SECTOR_COUNT,
+                        NULL, 0, 0);
+    return iso;
+}
+
+/*
+ * build_section_catalog_iso() — ISO with a non-bootable Initial/Default entry
+ * and a bootable EFI entry in the first catalog Section.
+ *
+ * Catalog layout (offsets within sector 19):
+ *   0   Validation entry       (32 bytes)
+ *   32  Initial entry          (32 bytes, NOT_BOOTABLE)
+ *   64  Section Header         (32 bytes, entry_count = 1, LAST)
+ *   96  Section Entry          (32 bytes, BOOTABLE, EFI platform)
+ */
+static uint8_t *build_section_catalog_iso(void)
+{
+    uint8_t *iso = calloc(1, TEST_ISO_SIZE);
+    if (iso == NULL) {
+        return NULL;
+    }
+
+    fill_common_sectors(iso,
+                        LBA_BOOT_CATALOG, LBA_ROOT_DIR, LBA_BOOT_IMAGE,
+                        (uint16_t)BOOT_IMAGE_SECTOR_COUNT,
+                        NULL, 0, 0);
+
+    /* Overwrite the catalog: non-bootable initial entry, bootable section. */
+    uint8_t *cat = iso + (size_t)LBA_BOOT_CATALOG * ISO_SECTOR_SIZE;
+
+    /* Initial entry: NOT_BOOTABLE */
+    cat[32] = ISO_ELTORITO_NOT_BOOTABLE;
+
+    /* Section Header at offset 64 */
+    uint8_t *sh = cat + 64;
+    sh[0] = ISO_ELTORITO_SECTION_LAST;      /* last section header        */
+    sh[1] = ISO_ELTORITO_PLATFORM_EFI;      /* EFI platform               */
+    put_u16le(sh + 2, 1u);                  /* entry_count = 1            */
+
+    /* Section Entry at offset 96 */
+    uint8_t *se = cat + 96;
+    se[0] = ISO_ELTORITO_BOOTABLE;
+    se[1] = ISO_ELTORITO_MEDIA_NO_EMUL;
+    put_u16le(se + 6, (uint16_t)BOOT_IMAGE_SECTOR_COUNT);
+    put_u32le(se + 8, LBA_BOOT_IMAGE);
+
+    return iso;
+}
+
+/*
+ * build_dir_size_iso() — ISO where the boot image has a directory entry
+ * (so find_extent_size_by_lba returns the full ISO sector size) but the
+ * catalog sector_count is set to 2 (= 1024 bytes < ISO_SECTOR_SIZE).
+ * The loader should return img.size == ISO_SECTOR_SIZE.
+ */
+static uint8_t *build_dir_size_iso(void)
+{
+    uint8_t *iso = calloc(1, TEST_ISO_SIZE);
+    if (iso == NULL) {
+        return NULL;
+    }
+
+    /*
+     * Build a directory record for "BOOTIMG.BIN" pointing to LBA_BOOT_IMAGE
+     * with the full ISO_SECTOR_SIZE as data_length.
+     * This record will be appended after "BOOT" in the root directory.
+     */
+    uint8_t extra_rec[44]; /* 33 (fixed header) + 11 (name) = 44, already even */
+    memset(extra_rec, 0, sizeof(extra_rec));
+    size_t extra_rec_len = make_dir_record(extra_rec,
+                                           LBA_BOOT_IMAGE, ISO_SECTOR_SIZE,
+                                           0u, "BOOTIMG.BIN", 11u);
+
+    /*
+     * Compute offset where extra record should go in the root-directory sector.
+     * After "." (34) + ".." (34) + "TEST.TXT" (42) + "BOOT" (38) = 148 bytes.
+     */
+    size_t extra_off = 34u + 34u + 42u + 38u;
+
+    fill_common_sectors(iso,
+                        LBA_BOOT_CATALOG, LBA_ROOT_DIR, LBA_BOOT_IMAGE,
+                        2u /* sector_count = 2 → load_size = 1024 */,
+                        extra_rec, extra_off, extra_rec_len);
     return iso;
 }
 
@@ -483,6 +529,125 @@ static int run_tests(const uint8_t *iso, size_t iso_size)
         iso_free_boot_image(&empty); /* must not crash */
     }
 
+    /* --- Test 10: iso_find_file() — version suffix in caller path --- */
+    {
+        /* The on-disc entry is "TEST.TXT" (no suffix).  A caller path that
+         * includes a version suffix ("/TEST.TXT;1") should still match. */
+        size_t         sz  = 0;
+        const uint8_t *ptr = iso_find_file(iso, iso_size, "/TEST.TXT;1", &sz);
+        if (ptr == NULL) {
+            fprintf(stderr,
+                    "FAIL: iso_find_file(\"/TEST.TXT;1\") (version suffix) "
+                    "returned NULL\n");
+            pass = 0;
+        }
+    }
+
+    return pass;
+}
+
+/* -------------------------------------------------------------------------
+ * run_extra_tests() — tests that require separately built ISO images
+ * ---------------------------------------------------------------------- */
+
+static int run_extra_tests(void)
+{
+    int pass = 1;
+
+    /* --- Test 11: multi-extent file returns NULL --- */
+    {
+        uint8_t *iso = build_test_iso();
+        if (iso == NULL) {
+            fprintf(stderr, "Cannot allocate ISO for multi-extent test\n");
+            return 0;
+        }
+
+        /*
+         * Patch the flags byte of the TEST.TXT directory record to set
+         * ISO_DIR_FLAG_MULTI.  Within the root-directory sector the record
+         * layout is: "."(34) + ".."(34) = 68 bytes before TEST.TXT.
+         * The flags field is at byte 25 of the record (offset 68+25 = 93).
+         */
+        uint8_t *root_sec = iso + (size_t)LBA_ROOT_DIR * ISO_SECTOR_SIZE;
+        root_sec[68 + 25] |= ISO_DIR_FLAG_MULTI;
+
+        size_t         sz  = 0;
+        const uint8_t *ptr = iso_find_file(iso, TEST_ISO_SIZE, "/TEST.TXT", &sz);
+        if (ptr != NULL) {
+            fprintf(stderr,
+                    "FAIL: multi-extent file should return NULL\n");
+            pass = 0;
+        }
+
+        free(iso);
+    }
+
+    /* --- Test 12: El Torito section-header scanning --- */
+    {
+        uint8_t *iso = build_section_catalog_iso();
+        if (iso == NULL) {
+            fprintf(stderr, "Cannot allocate ISO for section-catalog test\n");
+            return 0;
+        }
+
+        iso_boot_image_t img;
+        int rc = iso_load_boot_image(iso, TEST_ISO_SIZE, &img);
+        if (rc != 0) {
+            fprintf(stderr,
+                    "FAIL: section-catalog ISO with non-bootable initial entry "
+                    "returned %d (expected 0)\n", rc);
+            pass = 0;
+        } else {
+            if (img.media_type != ISO_ELTORITO_MEDIA_NO_EMUL) {
+                fprintf(stderr,
+                        "FAIL: section entry media_type %u (expected %u)\n",
+                        img.media_type, ISO_ELTORITO_MEDIA_NO_EMUL);
+                pass = 0;
+            }
+            if (img.load_rba != LBA_BOOT_IMAGE) {
+                fprintf(stderr,
+                        "FAIL: section entry load_rba %u (expected %u)\n",
+                        img.load_rba, LBA_BOOT_IMAGE);
+                pass = 0;
+            }
+            iso_free_boot_image(&img);
+        }
+
+        free(iso);
+    }
+
+    /* --- Test 13: boot-image size resolved from directory entry --- */
+    {
+        uint8_t *iso = build_dir_size_iso();
+        if (iso == NULL) {
+            fprintf(stderr, "Cannot allocate ISO for dir-size test\n");
+            return 0;
+        }
+
+        iso_boot_image_t img;
+        int rc = iso_load_boot_image(iso, TEST_ISO_SIZE, &img);
+        if (rc != 0) {
+            fprintf(stderr,
+                    "FAIL: dir-size ISO returned %d (expected 0)\n", rc);
+            pass = 0;
+        } else {
+            /*
+             * sector_count = 2 → load_size = 2 × 512 = 1024.
+             * Directory entry data_length = ISO_SECTOR_SIZE = 2048.
+             * The loader should use the larger directory size.
+             */
+            if (img.size != ISO_SECTOR_SIZE) {
+                fprintf(stderr,
+                        "FAIL: dir-size boot image size %zu (expected %u)\n",
+                        img.size, ISO_SECTOR_SIZE);
+                pass = 0;
+            }
+            iso_free_boot_image(&img);
+        }
+
+        free(iso);
+    }
+
     return pass;
 }
 
@@ -501,6 +666,8 @@ int main(void)
     int ok = run_tests(iso, TEST_ISO_SIZE);
 
     free(iso);
+
+    ok &= run_extra_tests();
 
     printf("ISO loader test: %s\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
