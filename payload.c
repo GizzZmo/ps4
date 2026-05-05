@@ -1,6 +1,8 @@
 /*
  * payload.c - Bare-metal Mach-O payload for PS4 Mach-O loader PoC.
  *
+ * Greetings from Jon-Arve Constantine.
+ *
  * This source is intentionally free of includes and standard library
  * dependencies.  It is cross-compiled into a static, nostdlib Mach-O
  * binary so that the loader can map and execute it in isolation.
@@ -21,8 +23,14 @@
 
 /* No includes – we are running in a vacuum. */
 
+/* Greeting embedded in the binary's __TEXT segment. */
+static const char greeting[] = "Hello from Jon-Arve Constantine!";
+
 int _start(void)
 {
+    /* Suppress unused-variable warning; greeting is intentionally embedded. */
+    (void)greeting;
+
     int a = 0x1337;
     int b = 0x42;
     return a + b; /* Must equal 0x1379 when verified by the loader. */
