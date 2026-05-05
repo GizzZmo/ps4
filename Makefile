@@ -4,7 +4,7 @@ CFLAGS        := -std=c11 -Wall -Wextra -O2 -I.
 PAYLOAD_CC    := clang
 PAYLOAD_FLAGS := -target x86_64-apple-macos -static -nostdlib -e __start
 
-.PHONY: all clean loader payload
+.PHONY: all clean loader payload test
 
 all: loader payload
 
@@ -22,5 +22,15 @@ payload: bare_metal_test
 bare_metal_test: payload.c
 	$(PAYLOAD_CC) $(PAYLOAD_FLAGS) -o $@ $<
 
+# Self-contained integration test – embeds the Mach-O as a C byte array so
+# no cross-compilation toolchain is needed.
+integration_test: macho_loader.c macho_test.c integration_test.c \
+                  macho_loader.h bare_metal_test_data.h
+	$(CC) $(CFLAGS) -o $@ macho_loader.c macho_test.c integration_test.c
+
+# Run the integration test and report PASS / FAIL.
+test: integration_test
+	./integration_test
+
 clean:
-	rm -f macho_loader_test bare_metal_test *.o
+	rm -f macho_loader_test bare_metal_test integration_test *.o

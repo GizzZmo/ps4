@@ -108,7 +108,7 @@ void *load_mach_o_segments(const uint8_t *macho_data, size_t size)
      * We request MAP_FIXED_NOREPLACE so we don't silently stomp existing
      * mappings; fall back to a non-fixed mapping if the address is busy.
      * ---------------------------------------------------------------- */
-    size_t   total_size = (size_t)(vm_max - vm_min);
+    size_t   total_size = (size_t)align_up(vm_max - vm_min, 0x1000);
     uint64_t slide      = 0;  /* ASLR slide; computed after mmap */
 
 #ifdef MAP_FIXED_NOREPLACE
