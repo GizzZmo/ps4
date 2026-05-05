@@ -95,9 +95,17 @@ The codebase follows a consistent C99/C11 style:
 
 ## Testing
 
-There is no automated test suite yet. Before submitting a PR, manually verify:
+Run the self-contained integration test with:
+
+```bash
+make test
+```
+
+This builds and executes `integration_test`, which embeds the Mach-O payload as a C byte array (no cross-compilation toolchain required) and prints `Integration test: PASS` on success.
+
+Before submitting a PR, verify:
 
 1. **Payload cross-compilation** produces a valid Mach-O (check with `otool -l` or `objdump -p`).
 2. **Loader build** succeeds with `-Wall -Wextra` and zero warnings.
-3. **Integration test** (embedding `bare_metal_test` and calling `test_macho_execution`) returns `PASS` on your development machine.
+3. **Integration test** (`make test`) exits with code 0 and prints `PASS`.
 4. If you have access to a PS4 with an active exploit, verify the test passes on the console too.
