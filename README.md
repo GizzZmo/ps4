@@ -1,5 +1,9 @@
 # PS4 Mach-O Loader — Proof of Concept
 
+[![Build Loader](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml)
+[![Build Payload](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml)
+[![Release](https://github.com/GizzZmo/ps4/actions/workflows/release.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/release.yml)
+
 > **Use at your own risk.** This project is for educational and research purposes only. Running unsigned code on a retail PS4 may void your warranty and violate Sony's terms of service.
 
 A self-contained, portable Mach-O 64-bit segment loader written in C that runs on the PS4's FreeBSD-based kernel. It parses a raw Mach-O image, maps each `LC_SEGMENT_64` into anonymous memory, and hands off execution to the binary's entry point — without depending on any Darwin or macOS system libraries.

@@ -1,0 +1,40 @@
+# Build Payload — cross-compile the bare-metal Mach-O payload on macOS.
+# Uploads the resulting binary as a workflow artifact.
+# Badge: https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml/badge.svg
+
+name: Build Payload
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-payload:
+    name: Build payload (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: make payload
+
+      - name: Verify Mach-O headers
+        run: |
+          set -euo pipefail
+          file bare_metal_test
+          otool -l bare_metal_test | grep -A4 LC_MAIN
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bare_metal_test-macho-x86_64
+          path: bare_metal_test
+          if-no-files-found: error
