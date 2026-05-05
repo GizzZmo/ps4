@@ -1,5 +1,9 @@
 # PS4 Mach-O Loader — Proof of Concept
 
+[![Build Loader](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-loader.yml)
+[![Build Payload](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/build-payload.yml)
+[![Release](https://github.com/GizzZmo/ps4/actions/workflows/release.yml/badge.svg)](https://github.com/GizzZmo/ps4/actions/workflows/release.yml)
+
 > **Use at your own risk.** This project is for educational and research purposes only. Running unsigned code on a retail PS4 may void your warranty and violate Sony's terms of service.
 
 A self-contained, portable Mach-O 64-bit segment loader written in C that runs on the PS4's FreeBSD-based kernel. It parses a raw Mach-O image, maps each `LC_SEGMENT_64` into anonymous memory, and hands off execution to the binary's entry point — without depending on any Darwin or macOS system libraries.
@@ -34,6 +38,7 @@ This project provides:
 | Type definitions & public API | `macho_loader.h` | Self-contained Mach-O structs; no `<mach-o/loader.h>` needed |
 | Segment loader | `macho_loader.c` | Parses the image and maps segments into anonymous memory |
 | Execution harness | `macho_test.c` | Promotes pages to RX, issues a memory fence, and runs the payload |
+| Driver / entry point | `main.c` | Reads the payload file and calls `test_macho_execution` |
 | Bare-metal payload | `payload.c` | Minimal `_start` with no libc – cross-compiled to Mach-O |
 
 ---
@@ -45,7 +50,9 @@ ps4/
 ├── macho_loader.h   # Mach-O type definitions and public API declarations
 ├── macho_loader.c   # Core segment loader (load_mach_o_segments)
 ├── macho_test.c     # Execution harness (test_macho_execution)
+├── main.c           # Driver: reads payload file, calls test_macho_execution
 ├── payload.c        # Bare-metal payload source (cross-compiled separately)
+├── Makefile         # Build rules for loader and payload
 ├── docs/
 │   ├── ARCHITECTURE.md      # Deep dive into loader internals
 │   ├── BUILD.md             # Step-by-step build instructions
@@ -120,9 +127,7 @@ git clone https://github.com/GizzZmo/ps4.git
 cd ps4
 
 # Build the loader and test harness
-clang -o macho_loader_test \
-    macho_loader.c macho_test.c \
-    -I. -Wall -Wextra -O2
+make loader
 ```
 
 ### 2. Build the bare-metal payload (macOS or Linux with Clang cross-toolchain)
