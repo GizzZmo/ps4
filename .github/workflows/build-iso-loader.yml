@@ -1,0 +1,41 @@
+# Build ISO Loader Test — dedicated artifact upload for iso_loader_test (self-contained ISO 9660 test binary).
+# NOTE: iso_loader_test is already exercised by `make test` in build-loader.yml and deploy.yml on every
+# push/PR. This workflow's primary purpose is to publish iso_loader_test as a named artifact.
+# Badge: https://github.com/GizzZmo/ps4/actions/workflows/build-iso-loader.yml/badge.svg
+
+name: Build ISO Loader Test
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-iso-loader:
+    name: Build iso_loader_test (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Clang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang
+
+      - name: Build
+        run: make iso_loader
+
+      - name: Run ISO loader test
+        run: ./iso_loader_test
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso_loader_test-linux-x86_64
+          path: iso_loader_test
+          if-no-files-found: error
