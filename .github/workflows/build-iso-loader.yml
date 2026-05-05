@@ -1,5 +1,5 @@
-# Build ISO Loader — compile the iso_loader + self-contained test on Linux (Ubuntu).
-# Uploads the resulting binary as a workflow artifact.
+# Build ISO Loader Test — compile iso_loader_test (the self-contained ISO 9660 test binary) on Linux (Ubuntu).
+# Uploads iso_loader_test as a workflow artifact.
 # Badge: https://github.com/GizzZmo/ps4/actions/workflows/build-iso-loader.yml/badge.svg
 
 name: Build ISO Loader
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-iso-loader:
-    name: Build iso_loader (Linux)
+    name: Build iso_loader_test (Linux)
     runs-on: ubuntu-latest
 
     steps:
